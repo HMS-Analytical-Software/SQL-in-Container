@@ -1,0 +1,194 @@
+# ASP.NET Core
+# Build and test ASP.NET Core projects targeting .NET Core.
+# Add steps that run tests, create a NuGet package, deploy, and more:
+# https://docs.microsoft.com/azure/devops/pipelines/languages/dotnet-core
+  
+
+trigger:
+- feature/*
+- master
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  - group: sqlserver-container-demo-ssu
+  - name: branchName
+    value: $[ replace(variables['Build.SourceBranch'], 'refs/heads/', '') ]
+
+stages:
+  - stage: Build    
+    displayName: Build
+    jobs:
+      - job: Build
+        displayName: Build Solution
+        steps:
+
+#        - script: dotnet new install MSBuild.Sdk.SqlProj.Templates
+#          displayName: 'Install MSBuild.Sdk.SqlProj.Templates'
+
+        - script: dotnet new install Microsoft.Build.Sql.Templates
+          displayName: 'Install Microsoft.Build.Sql.Templates'
+
+        - script: dotnet build Northwind.sln /p:NetCoreBuild=true --configuration Release
+          displayName: 'Build SQL Server Projects'
+          workingDirectory: src
+          
+        - publish: $(System.DefaultWorkingDirectory)/src/Northwind.Tests/bin/Release
+          displayName: Publish .dacpac's
+          artifact: build-artefacts
+      - job: Image
+        dependsOn: Build
+        displayName: Publish Image
+        steps:
+        
+        - task: DownloadPipelineArtifact@2
+          displayName: 'Download Build Artefacts'
+          inputs:
+            artifactName: build-artefacts
+            targetPath: $(System.DefaultWorkingDirectory)/dacpacs
+          
+        - script: sudo apt-get -y update && sudo apt-get -y install podman
+          displayName: 'Install podman'
+
+        - script: podman build --build-arg DACPACS="./dacpacs" --build-arg SA_USER="$(sql_username)" --build-arg SA_PASSWORD="$(sql_password)" --build-arg TARGET_DBNAME="$(sql_dbname)" --build-arg SOURCE_CONNECTION_STRING="$(master_connectionstring)" --tag northwind-latest .
+          displayName: 'Build Image'
+
+        - script: |
+            set -e
+            podman login -u $(acr_user) -p $(acr_passwd) $(acr_server)
+            podman push localhost/northwind-latest $(acr_server)/$(branchName)
+            podman push localhost/northwind-latest $(acr_server)/builds:$(Build.BuildId)
+          displayName: 'Publish Image'
+
+#       Saving the image as pipeline artefact
+#        - script: podman save -o database-latest.tar localhost/database-latest
+#          displayName: 'Download Container Artefact'
+#
+#        - publish: $(System.DefaultWorkingDirectory)/database-latest.tar
+#          displayName: Publish Container Artefact
+#          artifact: database-latest-image
+
+  - stage: Test
+    displayName: Test
+    jobs:
+    - job: Test
+      displayName: Run All Tests
+      steps:
+        - script: |
+            set -e
+            sudo apt-get -y update 
+            sudo apt-get -y install curl
+            curl https://packages.microsoft.com/keys/microsoft.asc | sudo tee /etc/apt/trusted.gpg.d/microsoft.asc
+            curl https://packages.microsoft.com/config/ubuntu/22.04/prod.list | sudo tee /etc/apt/sources.list.d/msprod.list
+            sudo apt-get -y update 
+            sudo apt-get -y install mssql-tools unixodbc-dev podman
+          displayName: 'Install Dependencies'
+
+        - script: |
+            set -e
+            podman login -u $(acr_user) -p $(acr_passwd) $(acr_server)
+            podman pull $(acr_server)/$(branchName):latest
+            podman run -p 1433:1433 $(acr_server)/$(branchName):latest > sqlserver.log & 
+            PODMAN_PID=$!
+            tail -F sqlserver.log | grep -q "Service Broker manager has started"
+            /opt/mssql-tools/bin/sqlcmd -S 127.0.0.1 -U $(sql_username) -P $(sql_password) -d $(sql_dbname) -y0 -Q "SET NOCOUNT ON;EXEC tSQLt.RunAll"
+            /opt/mssql-tools/bin/sqlcmd -S 127.0.0.1 -U $(sql_username) -P $(sql_password) -d $(sql_dbname) -y0 -Q "SET NOCOUNT ON;EXEC tSQLt.XmlResultFormatter" -o $(System.DefaultWorkingDirectory)/test_results.xml
+            kill -s SIGINT $PODMAN_PID
+          displayName: 'Run Tests'
+
+        - task: PublishTestResults@2
+          displayName: "Publish Results"
+          inputs:
+            testRunTitle: "Results"
+            failTaskOnFailedTests: true
+            testResultsFormat: "JUnit"
+            testResultsFiles: "test_results.xml"
+            searchFolder: "$(System.DefaultWorkingDirectory)"
+            
+  - stage: Plan
+    jobs:
+      - job: Report
+        displayName: Create Deploy Report
+        steps:
+        - script: |
+            mkdir ./tools
+            wget https://aka.ms/sqlpackage-linux -O ./tools/sqlpackage-linux.zip
+            unzip ./tools/sqlpackage-linux -d ./tools/sqlpackage
+            chmod a+x ./tools/sqlpackage/sqlpackage
+          displayName: 'Install dependencies'
+
+        - task: DownloadPipelineArtifact@2
+          displayName: 'Download Build Artefacts'
+          inputs:
+            artifactName: build-artefacts
+            targetPath: $(System.DefaultWorkingDirectory)/dacpacs          
+          
+        - script: |
+            mkdir ./reports
+            ./tools/sqlpackage/sqlpackage /Action:DeployReport /TargetConnectionString:"$(production_connectionstring)" /SourceFile:"./dacpacs/Northwind.dacpac" /OutputPath:"./reports/plan_report.xml" /Profile:"./dacpacs/Northwind.publish.xml" /p:AllowIncompatiblePlatform=True
+            ./tools/sqlpackage/sqlpackage /Action:Script /TargetConnectionString:"$(production_connectionstring)" /SourceFile:"./dacpacs/Northwind.dacpac" /OutputPath:"./reports/plan_script.sql" /Profile:"./dacpacs/Northwind.publish.xml" /p:AllowIncompatiblePlatform=True
+          displayName: 'Create Report'
+        
+        - publish: $(System.DefaultWorkingDirectory)/reports
+          artifact: plan-artefacts
+          displayName: Publish Report
+
+  - ${{ if eq(variables['Build.SourceBranch'], 'refs/heads/master') }}:
+    - stage: Deploy
+      jobs:
+      - deployment: Deploy
+        displayName: Deploy Schema to Production
+        pool:
+          vmImage: 'Ubuntu-latest'
+        environment: 'MSSQL-master-database-environment'
+        strategy:
+          runOnce:
+            deploy:
+              steps:        
+                - script: |
+                    set -e
+                    sudo apt-get -y update 
+                    sudo apt-get -y install curl
+                    curl https://packages.microsoft.com/keys/microsoft.asc | sudo tee /etc/apt/trusted.gpg.d/microsoft.asc
+                    curl https://packages.microsoft.com/config/ubuntu/22.04/prod.list | sudo tee /etc/apt/sources.list.d/msprod.list
+                    sudo apt-get -y update 
+                    sudo apt-get -y install mssql-tools unixodbc-dev podman
+                    mkdir ./tools
+                    wget https://aka.ms/sqlpackage-linux -O ./tools/sqlpackage-linux.zip
+                    unzip ./tools/sqlpackage-linux -d ./tools/sqlpackage
+                    chmod a+x ./tools/sqlpackage/sqlpackage
+
+        
+                  displayName: 'Install dependencies'
+
+                - task: DownloadPipelineArtifact@2
+                  displayName: 'Download Build Artefacts'
+                  inputs:
+                    artifactName: build-artefacts
+                    targetPath: $(System.DefaultWorkingDirectory)/dacpacs        
+
+                - task: DownloadPipelineArtifact@2
+                  displayName: 'Download Plan Artefacts'
+                  inputs:
+                    artifactName: plan-artefacts
+                    targetPath: $(System.DefaultWorkingDirectory)/reports
+
+                - script: |
+                    set -e
+                    ./tools/sqlpackage/sqlpackage /Action:Script /TargetConnectionString:"$(production_connectionstring)" /SourceFile:"./dacpacs/Northwind.dacpac" /OutputPath:"./reports/deploy_script.sql" /Profile:"./dacpacs/Northwind.publish.xml" /p:AllowIncompatiblePlatform=True
+                  displayName: 'Create Script'
+        
+                - script: |
+                    set -e
+                    diff ./reports/deploy_script.sql ./reports/plan_script.sql
+                  displayName: 'Compare Script with Plan'
+        
+                - task: PowerShell@2
+                  displayName: Publish
+                  inputs:
+                    pwsh: true
+                    targetType: 'inline'
+                    script: |
+                      Install-Module -Name SqlServer -Scope CurrentUser -force
+                      Invoke-Sqlcmd -ConnectionString "$(production_connectionstring)" -InputFile "./reports/deploy_script.sql"

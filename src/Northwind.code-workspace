@@ -1,0 +1,25 @@
+{
+	"folders": [
+		{
+			"name": "Northwind",
+			"path": "Northwind"
+		},
+		{
+			"name": "Northwind.Tests",
+			"path": "Northwind.Tests"
+		},
+		{
+			"name": "tSQLt",
+			"path": "tSQLt"
+		},
+		{
+			"name": "tSQLt.AzureSQL",
+			"path": "tSQLt.AzureSQL"
+		}
+	],
+	"settings": {
+		"dataworkspace.excludedProjects": [
+			"tSQLt/tSQLt.sqlproj"
+		]
+	}
+}

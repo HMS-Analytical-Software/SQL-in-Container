@@ -1,0 +1,80 @@
+# ASP.NET Core
+# Build and test ASP.NET Core projects targeting .NET Core.
+# Add steps that run tests, create a NuGet package, deploy, and more:
+# https://docs.microsoft.com/azure/devops/pipelines/languages/dotnet-core
+  
+
+trigger:
+- feature/*
+- master
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  - group: sqlserver-container-demo-ssu
+  - name: branchName
+    value: $[ replace(variables['Build.SourceBranch'], 'refs/heads/', '') ]
+
+stages:
+  - stage: Build    
+    displayName: Build
+    jobs:
+      - job: Build
+        displayName: Build Solution
+        steps:
+
+        - script: dotnet new install Microsoft.Build.Sql.Templates
+          displayName: 'Install Microsoft.Build.Sql.Templates'
+
+        - script: dotnet build Northwind.sln /p:NetCoreBuild=true --configuration Release
+          displayName: 'Build SQL Server Projects'
+          workingDirectory: src
+          
+        - publish: $(System.DefaultWorkingDirectory)/src/Northwind.Tests/bin/Release
+          displayName: Publish .dacpac's
+          artifact: build-artefacts
+          
+        - script: |
+            sudo apt-get -y update && sudo apt-get -y install podman curl
+            set -e
+            curl https://packages.microsoft.com/keys/microsoft.asc | sudo tee /etc/apt/trusted.gpg.d/microsoft.asc
+            curl https://packages.microsoft.com/config/ubuntu/22.04/prod.list | sudo tee /etc/apt/sources.list.d/msprod.list
+            sudo apt-get -y update 
+            sudo apt-get -y install mssql-tools unixodbc-dev        
+          displayName: 'Install podman and sql tools'
+
+        - script: | 
+            mkdir src
+            cp ../src/Northwind.Tests/bin/Release/* ./src
+            cp ../_demo1/instnwnd.sql ./src
+            cp ../src/Externals/tSQLt.PrepareServer.sql ./src      
+            podman build --tag northwind-latest .
+          displayName: 'Build Image'
+          workingDirectory: _demo2
+
+        - script: |
+            set -e
+            podman run -p 1733:1433 --hostname hisdevenv northwind-latest > sqlserver.log & 
+            PODMAN_PID=$!
+            tail -F sqlserver.log | grep -q "Service Broker manager has started"
+            /opt/mssql-tools/bin/sqlcmd -S 127.0.0.1,1733 -U sa -P dev_sa1337! -d Northwind -y0 -Q "SET NOCOUNT ON; EXEC tSQLt.SetTestResultFormatter @Formatter = 'tSQLt.XmlResultFormatter';EXEC tSQLt.RunAll" -o $(System.DefaultWorkingDirectory)/test_results.xml
+            kill -s SIGINT $PODMAN_PID
+          displayName: 'Run Tests'
+
+        - task: PublishTestResults@2
+          displayName: "Publish Results"
+          inputs:
+            testRunTitle: "Results"
+            failTaskOnFailedTests: true
+            testResultsFormat: "JUnit"
+            testResultsFiles: "test_results.xml"
+            searchFolder: "$(System.DefaultWorkingDirectory)"
+
+
+        - script: |
+            set -e
+            podman login -u $(acr_user) -p $(acr_passwd) $(acr_server)
+            podman push localhost/northwind-latest $(acr_server)/$(branchName)
+            podman push localhost/northwind-latest $(acr_server)/builds:$(Build.BuildId)
+          displayName: 'Publish Image'

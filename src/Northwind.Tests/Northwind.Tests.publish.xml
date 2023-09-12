@@ -1,0 +1,30 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <IncludeCompositeObjects>True</IncludeCompositeObjects>
+    <TargetDatabaseName>Northwind</TargetDatabaseName>
+    <DeployScriptFileName>Northwind.Tests.sql</DeployScriptFileName>
+    <BlockOnPossibleDataLoss>False</BlockOnPossibleDataLoss>
+    <ExcludeExternalLibraries>True</ExcludeExternalLibraries>
+    <BackupDatabaseBeforeChanges>False</BackupDatabaseBeforeChanges>
+    <ProfileVersionNumber>1</ProfileVersionNumber>
+    <ExcludeCredentials>True</ExcludeCredentials>
+    <ExcludeLogins>True</ExcludeLogins>
+    <ExcludeLinkedServerLogins>True</ExcludeLinkedServerLogins>
+    <ExcludeAssemblies>True</ExcludeAssemblies>
+    <ExcludeUserDefinedDataTypes>False</ExcludeUserDefinedDataTypes>
+    <ExcludeClrUserDefinedTypes>False</ExcludeClrUserDefinedTypes>
+    <ExcludeUserDefinedTableTypes>False</ExcludeUserDefinedTableTypes>
+    <ExcludeUsers>True</ExcludeUsers>
+    <IgnorePermissions>False</IgnorePermissions>
+    <ExcludeDatabaseRoles>False</ExcludeDatabaseRoles>
+    <ExcludeCertificates>True</ExcludeCertificates>
+    <IgnoreUserSettingsObjects>True</IgnoreUserSettingsObjects>
+    <DropObjectsNotInSource>True</DropObjectsNotInSource>
+    <DropExtendedPropertiesNotInSource>False</DropExtendedPropertiesNotInSource>
+    <TargetConnectionString>Data Source=127.0.0.1;Persist Security Info=True;User ID=sa;Pooling=False;MultipleActiveResultSets=False;Connect Timeout=60;Encrypt=False;TrustServerCertificate=False</TargetConnectionString>
+    <DatabaseEdition>Basic</DatabaseEdition>
+    <DatabaseServiceObjective>Basic</DatabaseServiceObjective>
+    <DatabaseMaximumSize>2</DatabaseMaximumSize>
+  </PropertyGroup>
+</Project>
