@@ -1,0 +1,22 @@
+﻿src/Databases/Northwind/bin
+src/Databases/Northwind/obj
+src/Databases/Northwind/Schemaprotokolle importieren
+src/Databases/.vs
+src/Databases/Northwind/DB.Build/obj
+src/Databases/Northwind/DB.Build/.vs
+src/Databases/Northwind/DB.Build/bin
+src/Databases/Northwind.Core/bin
+src/Databases/Northwind.Core/obj
+src/.vs
+src/Databases/Northwind/.vs
+**/.vs
+**/bin/Debug
+**/obj/Debug/
+src/*/obj
+*.sqlproj_backup
+*.sqlproj_backup2
+*.user
+*.jfm
+*.dbmdl
+src/nw
+src/.idea
